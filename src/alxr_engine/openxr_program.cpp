@@ -395,6 +395,18 @@ struct OpenXrProgram final : IOpenXrProgram {
                 }
             }
         }
+        
+        if (eyeTracker_ != XR_NULL_HANDLE)
+        {
+            Log::Write(Log::Level::Verbose, "Destroying EyeTracker");
+            m_xrDestroyEyeTrackerFB_(eyeTracker_);
+        }
+        
+        if (faceTracker_ != XR_NULL_HANDLE)
+        {
+            Log::Write(Log::Level::Verbose, "Destroying FaceTracker");
+            m_xrDestroyFaceTrackerFB_(faceTracker_);
+        }
 
         m_interactionManager.reset();
 
@@ -477,8 +489,8 @@ struct OpenXrProgram final : IOpenXrProgram {
         // TODO: Uncomment these to enable using FB facial & social eye tracking extensions
         //       Uncomment alvr\openxr-client\alxr-android-client\quest\Cargo.toml the relevant use-features/permissions
         //       Add permission requests to alvr\openxr-client\alxr-android-client\src\permissions.rs
-        // { XR_FB_EYE_TRACKING_SOCIAL_EXTENSION_NAME, false },
-        // { XR_FB_FACE_TRACKING_EXTENSION_NAME, false },
+         { XR_FB_EYE_TRACKING_SOCIAL_EXTENSION_NAME, false },
+         { XR_FB_FACE_TRACKING_EXTENSION_NAME, false },
 #endif
 #ifdef XR_USE_OXR_PICO
 #pragma message ("Pico Neo 3 OXR Extensions Enabled.")
@@ -1043,48 +1055,101 @@ struct OpenXrProgram final : IOpenXrProgram {
         return true;
     }
 
+    XrEyeTrackerFB eyeTracker_ = XR_NULL_HANDLE;
+    PFN_xrDestroyEyeTrackerFB m_xrDestroyEyeTrackerFB_ = nullptr;
+    PFN_xrGetEyeGazesFB m_xrGetEyeGazesFB_ = nullptr;
     bool InitializeEyeTrackers()
     {
 #ifdef XR_USE_OXR_OCULUS
-        //XrSystemEyeTrackingPropertiesFB eyeTrackingSystemProperties{
-        //    .type = XR_TYPE_SYSTEM_EYE_TRACKING_PROPERTIES_FB,
-        //    .next = nullptr
-        //};
-        //XrSystemProperties systemProperties{
-        //    .type = XR_TYPE_SYSTEM_PROPERTIES,
-        //    .next = &eyeTrackingSystemProperties
-        //};
-        //CHECK_XRCMD(xrGetSystemProperties(m_instance, m_systemId, &systemProperties));
-        //if (!eyeTrackingSystemProperties.supportsEyeTracking) {
-        //    Log::Write(Log::Level::Info, Fmt("%s is not supported.", XR_FB_EYE_TRACKING_SOCIAL_EXTENSION_NAME));
-        //    return false;
-        //}
+        XrSystemEyeTrackingPropertiesFB eyeTrackingSystemProperties{
+            .type = XR_TYPE_SYSTEM_EYE_TRACKING_PROPERTIES_FB,
+            .next = nullptr
+        };
+        XrSystemProperties systemProperties{
+            .type = XR_TYPE_SYSTEM_PROPERTIES,
+            .next = &eyeTrackingSystemProperties
+        };
+        CHECK_XRCMD(xrGetSystemProperties(m_instance, m_systemId, &systemProperties));
+        if (!eyeTrackingSystemProperties.supportsEyeTracking) {
+            Log::Write(Log::Level::Info, Fmt("%s is not supported.", XR_FB_EYE_TRACKING_SOCIAL_EXTENSION_NAME));
+            return false;
+        }
 
-        //Log::Write(Log::Level::Info, Fmt("%s is enabled.", XR_FB_EYE_TRACKING_SOCIAL_EXTENSION_NAME));
+        Log::Write(Log::Level::Info, Fmt("%s is enabled.", XR_FB_EYE_TRACKING_SOCIAL_EXTENSION_NAME));
+		
+        // Acquire Function Pointers
+        PFN_xrCreateEyeTrackerFB m_xrCreateEyeTrackerFB_ = nullptr;
+
+        xrGetInstanceProcAddr(
+                this->m_instance, "xrCreateEyeTrackerFB", (PFN_xrVoidFunction*)(&m_xrCreateEyeTrackerFB_));
+        xrGetInstanceProcAddr(
+                this->m_instance,
+                "xrDestroyEyeTrackerFB",
+                (PFN_xrVoidFunction*)(&m_xrDestroyEyeTrackerFB_));
+        xrGetInstanceProcAddr(
+                this->m_instance, "xrGetEyeGazesFB", (PFN_xrVoidFunction*)(&m_xrGetEyeGazesFB_));
+        
+        // Create Eye Tracker
+        XrEyeTrackerCreateInfoFB createInfo{XR_TYPE_EYE_TRACKER_CREATE_INFO_FB};
+        m_xrCreateEyeTrackerFB_(this->m_session, &createInfo, &eyeTracker_);
+        
+        // Retrieve Eye Gaze Data
+        XrEyeGazesFB eyeGazes{XR_TYPE_EYE_GAZES_FB};
+        eyeGazes.next = nullptr;
+
+        XrEyeGazesInfoFB gazesInfo{XR_TYPE_EYE_GAZES_INFO_FB};
+        gazesInfo.baseSpace = this->m_appSpace;
+
+        m_xrGetEyeGazesFB_(eyeTracker_, &gazesInfo, &eyeGazes);
 #endif
+			
         return true;
     }
-
+    
+    XrFaceTrackerFB faceTracker_ = XR_NULL_HANDLE;
+    PFN_xrDestroyFaceTrackerFB m_xrDestroyFaceTrackerFB_ = nullptr;
+    PFN_xrGetFaceExpressionWeightsFB m_xrGetFaceExpressionWeightsFB_ = nullptr;
     bool InitializeFacialTracker()
     {
 #ifdef XR_USE_OXR_OCULUS
-        //XrSystemFaceTrackingPropertiesFB faceTrackingSystemProperties{
-        //    .type = XR_TYPE_SYSTEM_FACE_TRACKING_PROPERTIES_FB,
-        //    .next = nullptr
-        //};
-        //XrSystemProperties systemProperties{
-        //    .type = XR_TYPE_SYSTEM_PROPERTIES,
-        //    .next = &faceTrackingSystemProperties
-        //};
-        //CHECK_XRCMD(xrGetSystemProperties(m_instance, m_systemId, &systemProperties));
-        //if (!faceTrackingSystemProperties.supportsFaceTracking) {
-        //    Log::Write(Log::Level::Info, Fmt("%s is not supported.", XR_FB_FACE_TRACKING_EXTENSION_NAME));
-        //    return false;
-        //}
+        XrSystemFaceTrackingPropertiesFB faceTrackingSystemProperties{
+            .type = XR_TYPE_SYSTEM_FACE_TRACKING_PROPERTIES_FB,
+            .next = nullptr
+        };
+        XrSystemProperties systemProperties{
+            .type = XR_TYPE_SYSTEM_PROPERTIES,
+            .next = &faceTrackingSystemProperties
+        };
+        CHECK_XRCMD(xrGetSystemProperties(m_instance, m_systemId, &systemProperties));
+        if (!faceTrackingSystemProperties.supportsFaceTracking) {
+            Log::Write(Log::Level::Info, Fmt("%s is not supported.", XR_FB_FACE_TRACKING_EXTENSION_NAME));
+            return false;
+        }
 
-        //Log::Write(Log::Level::Info, Fmt("%s is enabled.", XR_FB_FACE_TRACKING_EXTENSION_NAME));
-#endif
+        Log::Write(Log::Level::Info, Fmt("%s is enabled.", XR_FB_FACE_TRACKING_EXTENSION_NAME));
+
+        // Acquire Function Pointers
+        PFN_xrCreateFaceTrackerFB m_xrCreateFaceTrackerFB_ = nullptr;
+
+        xrGetInstanceProcAddr(
+                this->m_instance,
+                "xrCreateFaceTrackerFB",
+                (PFN_xrVoidFunction*)(&m_xrCreateFaceTrackerFB_));
+        xrGetInstanceProcAddr(
+                this->m_instance,
+                "xrDestroyFaceTrackerFB",
+                (PFN_xrVoidFunction*)(&m_xrDestroyFaceTrackerFB_));
+        xrGetInstanceProcAddr(
+                this->m_instance,
+                "xrGetFaceExpressionWeightsFB",
+                (PFN_xrVoidFunction*)(&m_xrGetFaceExpressionWeightsFB_));
+
+        faceTracker_ = XR_NULL_HANDLE;
+        XrFaceTrackerCreateInfoFB createInfo{XR_TYPE_FACE_TRACKER_CREATE_INFO_FB};
+        m_xrCreateFaceTrackerFB_(this->m_session, &createInfo, &faceTracker_);
+        
         return true;
+#endif
     }
 
     bool InitializeHandTrackers()
