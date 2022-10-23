@@ -44,6 +44,13 @@
 #include "interaction_profiles.h"
 #include "interaction_manager.h"
 
+// The port number the WebSocket server listens on
+#define PORT_NUMBER 8080
+#include "WebsocketServer.h"
+#include <iostream>
+#include <thread>
+#include <asio/io_service.hpp>
+
 #ifdef XR_USE_PLATFORM_ANDROID
 #ifndef ALXR_ENGINE_DISABLE_QUIT_ACTION
 #define ALXR_ENGINE_DISABLE_QUIT_ACTION
@@ -395,7 +402,14 @@ struct OpenXrProgram final : IOpenXrProgram {
                 }
             }
         }
-        
+
+        if (server != nullptr) 
+        {
+            Log::Write(Log::Level::Verbose, "Destroying Server");
+            server->Stop();
+            server = nullptr;
+        }
+			
         if (eyeTracker_ != XR_NULL_HANDLE)
         {
             Log::Write(Log::Level::Verbose, "Destroying EyeTracker");
@@ -919,7 +933,9 @@ struct OpenXrProgram final : IOpenXrProgram {
         auto ext_itr = m_availableSupportedExtMap.find(extName);
         return ext_itr != m_availableSupportedExtMap.end() && ext_itr->second;
     }
-
+    
+    asio::io_service eyeFaceDataPoll;
+    WebsocketServer server;
     bool InitializeExtensions()
     {
         CHECK(m_instance != XR_NULL_HANDLE);
@@ -1018,8 +1034,69 @@ struct OpenXrProgram final : IOpenXrProgram {
         SetDeviceColorSpace();
         UpdateSupportedDisplayRefreshRates();
         InitializePassthroughAPI();
-        InitializeEyeTrackers();
-        InitializeFacialTracker();
+        if (InitializeEyeTrackers() || InitializeFacialTracker()) 
+        {
+            // Register our network callbacks, ensuring the logic is run on the main thread's event loop
+            server.connect([&eyeFaceDataPoll, &server](ClientConnection conn) {
+                eyeFaceDataPoll.post([conn, &server]() {
+                    Log::Write(Log::Level::Info, "Connection opened.");
+                    Log::Write(Log::Level::Info, "There are now " << server.numConnections() << " open connections.");
+
+                    // Send a hello message to the client
+                    server.sendMessage(conn, "Hello client!", Json::Value());
+                });
+            });
+            server.disconnect([&eyeFaceDataPoll, &server](ClientConnection conn) {
+                eyeFaceDataPoll.post([conn, &server]() {
+                    Log::Write(Log::Level::Info, "Connection closed.");
+                    Log::Write(Log::Level::Info, "There are now " << server.numConnections() << " open connections.");
+                });
+            });
+            server.message("message", [&eyeFaceDataPoll, &server](ClientConnection conn, const Json::Value& args) {
+                eyeFaceDataPoll.post([conn, args, &server]() {
+					
+                    // Echo the message pack to the client
+                    server.sendMessage(conn, "message", args);
+                });
+            });
+
+            // Start the networking thread
+            std::thread serverThread([&server]() { server.run(PORT_NUMBER); });
+
+            std::thread inputThread([&server, &eyeFaceDataPoll]() 
+            {
+                while (1) {
+                    // Read user input from stdin
+                    // std::getline(std::cin, input);
+
+                    if (eyeTracker_ != XR_NULL_HANDLE) 
+                    {
+                        // Broadcast the input to all connected clients (is sent on the network thread)
+                        for (int eye = 0; eye < 2; ++eye) {
+                            if (eyeGazes.gaze[eye].isValid) {
+                                Json::Value payload;
+                                payload["input"] = eyeGazes.gaze[eye];
+                                server.broadcastMessage("userInput", payload);
+                            }
+                        } 
+                    }
+
+                    if (faceTracker_ != XR_NULL_HANDLE) 
+                    {
+                        Json::Value payload;
+                        payload["input"] = expressionWeights;
+                        server.broadcastMessage("userInput", payload);
+                    }
+						
+                    // Debug output on the main thread
+                    // eyeFaceDataPoll.post([]() { std::clog << "User input debug output on the main thread" << std::endl; });
+                }
+            });
+
+            // Start the event loop for the main thread
+            asio::io_service::work work(eyeFaceDataPoll);
+            eyeFaceDataPoll.run();
+        }
         return InitializeHandTrackers();
     }
 
