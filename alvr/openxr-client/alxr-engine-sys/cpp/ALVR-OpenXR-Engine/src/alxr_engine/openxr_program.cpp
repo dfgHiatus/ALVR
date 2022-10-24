@@ -403,12 +403,12 @@ struct OpenXrProgram final : IOpenXrProgram {
             }
         }
 
-        if (server != nullptr) 
-        {
-            Log::Write(Log::Level::Verbose, "Destroying Server");
-            server->Stop();
-            server = nullptr;
-        }
+//        if (server != nullptr) 
+//        {
+//            Log::Write(Log::Level::Verbose, "Destroying Server");
+//            server->Stop();
+//            server = nullptr;
+//        }
 			
         if (eyeTracker_ != XR_NULL_HANDLE)
         {
@@ -1034,6 +1034,7 @@ struct OpenXrProgram final : IOpenXrProgram {
         SetDeviceColorSpace();
         UpdateSupportedDisplayRefreshRates();
         InitializePassthroughAPI();
+        
         if (InitializeEyeTrackers() || InitializeFacialTracker()) 
         {
             // Register our network callbacks, ensuring the logic is run on the main thread's event loop
@@ -1049,9 +1050,9 @@ struct OpenXrProgram final : IOpenXrProgram {
             server.disconnect([&eyeFaceDataPoll, &server](ClientConnection conn) {
                 eyeFaceDataPoll.post([conn, &server]() {
                     Log::Write(Log::Level::Info, "Connection closed.");
-                    Log::Write(Log::Level::Info, "There are now " << server.numConnections() << " open connections.");
+                    Log::Write(Log::Level::Info, std::format("There are now {0} open connections.", server.numConnections()));
                 });
-            });
+            }); 
             server.message("message", [&eyeFaceDataPoll, &server](ClientConnection conn, const Json::Value& args) {
                 eyeFaceDataPoll.post([conn, args, &server]() {
 					

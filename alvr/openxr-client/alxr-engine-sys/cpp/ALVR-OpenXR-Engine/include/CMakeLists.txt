@@ -18,3 +18,9 @@
 #
 
 add_subdirectory(openxr)
+
+# From Hiatus
+add_subdirectory(asio)
+add_subdirectory(json)
+add_subdirectory(websocketpp)
+
