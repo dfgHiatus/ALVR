@@ -4,6 +4,16 @@
 
 #define ENGINE_DLL_EXPORTS
 
+int server_fd, new_socket;
+#define PORT 8080
+#define BUFSIZE 512
+#define PACKETSIZE sizeof(ALXREyeFaceInfo)
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
 #include "pch.h"
 #include "common.h"
 #include "options.h"
@@ -394,6 +404,12 @@ struct OpenXrProgram final : IOpenXrProgram {
                     handTracker.tracker = XR_NULL_HANDLE;
                 }
             }
+        }
+        
+        if (new_socket != 0)
+        {
+            close(new_socket);
+            shutdown(server_fd, SHUT_RDWR);
         }
 			
         if (eyeTracker_ != XR_NULL_HANDLE)
@@ -1018,10 +1034,51 @@ struct OpenXrProgram final : IOpenXrProgram {
         SetDeviceColorSpace();
         UpdateSupportedDisplayRefreshRates();
         InitializePassthroughAPI();
-        InitializeEyeTrackers();
-        InitializeFacialTracker(); 
+        
+        if (InitializeEyeTrackers() || InitializeFacialTracker()) 
+        {
+            SetupWebsocket();
+        }
 
         return InitializeHandTrackers();
+    }
+    
+    
+    void SetupWebsocket() 
+    {
+        struct sockaddr_in address;
+        int opt = 1;
+        int addrlen = sizeof(address);
+        
+        // Creating socket file descriptor
+        if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
+            Log::Write(Log::Level::Error, "Websocket failed at connection step!");
+            return;
+        }
+        address.sin_family = AF_INET;
+        address.sin_addr.s_addr = INADDR_ANY;
+        address.sin_port = htons(PORT);
+
+        // Forcefully attaching socket to the port 8080
+        if (bind(server_fd, (struct sockaddr*)&address,
+                 sizeof(address))
+            < 0) {
+            Log::Write(Log::Level::Error, "Websocket binding failed!");
+            return;
+        }
+        
+        if (listen(server_fd, 3) < 0) {
+            Log::Write(Log::Level::Error, "Websocket listen error!");
+            return;
+        }
+        
+        if ((new_socket
+                     = accept(server_fd, (struct sockaddr*)&address,
+                              (socklen_t*)&addrlen))
+            < 0) {
+            Log::Write(Log::Level::Error, "Unable to connect to Websocket");
+            return;
+        }
     }
 
     bool SetDeviceColorSpace()
@@ -1809,6 +1866,8 @@ struct OpenXrProgram final : IOpenXrProgram {
     bool IsSessionRunning() const override { return m_sessionRunning; }
     bool IsSessionFocused() const override { return m_sessionState == XR_SESSION_STATE_FOCUSED; }
 
+    ALXREyeFaceInfo ALXREyeFaceInfo;
+    
     // Called in rust
     bool PollEyeTracker(ALXREyeTrackingInfo& ALXREyeTrackingInfo)
     {
@@ -2542,6 +2601,7 @@ struct OpenXrProgram final : IOpenXrProgram {
         return GetEyeInfo(eyeInfo, m_lastPredicatedDisplayTime);
     }
 
+    char data[PACKETSIZE];
     virtual bool GetTrackingInfo(TrackingInfo& info, const bool clientPredict) /*const*/ override
     {
         const XrDuration predicatedLatencyOffsetNs = m_PredicatedLatencyOffset.load();
@@ -2605,6 +2665,15 @@ struct OpenXrProgram final : IOpenXrProgram {
 
         PollHandTrackers(inputPredicatedTime, info.controller);
 
+        if (new_socket != 0) 
+        {
+            PollEyeTracker(ALXREyeFaceInfo.ALXREyeTrackingInfo);
+            PollFaceTracker(ALXREyeFaceInfo.ALXRFaceTrackingInfo);
+            
+            memcpy(data, &ALXREyeFaceInfo, sizeof(ALXREyeFaceInfo)); // Assuming POD
+            send(new_socket, data, strlen(data), 0);
+        }
+        
         LatencyCollector::Instance().tracking(predicatedDisplayTimeNs);
         return true;
     }

@@ -130,6 +130,12 @@ struct ALXRFaceTrackingInfo{
     // float confidence[63];
 };
 
+struct ALXREyeFaceInfo
+{
+    ALXREyeTrackingInfo ALXREyeTrackingInfo;
+    ALXRFaceTrackingInfo ALXRFaceTrackingInfo;
+};
+
 #ifdef __cplusplus
 }
 #endif
